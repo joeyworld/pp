@@ -1,8 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #define FLOOR 20
+#define NUM_ELEVATORS 6
 
 /* 요청 구조체 */
 typedef struct _REQUEST {
@@ -27,43 +30,190 @@ typedef struct _QUEUE {
 /* 엘리베이터 구조체 */
 typedef struct _ELEVATOR {
     int floor[FLOOR]; //각 층에 멈추는지 여부
-    int num_people; //현재 타고있는 사람 수
+    int is_moving; //운행 중인지 여부
+    int curr_people; //현재 타고있는 사람 수
+    int total_people; //현재까지 총 태운 사람 수
     int fix; //수리 중인지 여부
     Queue reqs; //현재 들어와있는 요청
 }Elevator;
 
+/* input_t thread에서 필요한 변수 */
+typedef struct _INPUT {
+    char *menu_input;
+    int *floor_input;
+}Input;
+
+/* simul_t thread에서 필요한 변수 */
+typedef struct _SIMUL {
+    Input *input;
+    Elevator *elevators[6];
+}Simul;
+
 /* 함수 헤더 */
+void *input_f(void *data); //input_t thread에서 실행되는 함수
+void *simul_f(void *data); //simul_t thread에서 실행되는 함수
+void allocate(Input **input, Simul **simul); //동적할당 처리
+void init(Elevator *elevators[6]);
+void print_elevator_info(Elevator *elevators[6]);
 void print_menu();
+char get_menu_input();
+void quit(Elevator *elevators[6]);
 
-int main() {
-    Elevator low1, low2;
-    Elevator high1, high2;
-    Elevator all1, all2;
+int main(void) {
+    Input *input;
+    Simul *simul;
+    pthread_t input_t;
+    pthread_t simul_t;
+    int tid_input;
+    int tid_simul;
 
-    low1.reqs.front = (Node *)malloc(sizeof(Node));
-    low1.reqs.rear = (Node *)malloc(sizeof(Node));
-    low2.reqs.front = (Node *)malloc(sizeof(Node));
-    low2.reqs.rear = (Node *)malloc(sizeof(Node));
-    high1.reqs.front = (Node *)malloc(sizeof(Node));
-    high1.reqs.rear = (Node *)malloc(sizeof(Node));
-    high2.reqs.front = (Node *)malloc(sizeof(Node));
-    high2.reqs.rear = (Node *)malloc(sizeof(Node));
-    all1.reqs.front = (Node *)malloc(sizeof(Node));
-    all1.reqs.rear = (Node *)malloc(sizeof(Node));
-    all2.reqs.front = (Node *)malloc(sizeof(Node));
-    all2.reqs.rear = (Node *)malloc(sizeof(Node));
+    allocate(&input, &simul);
 
-    print_menu();
+    tid_input = pthread_create(&input_t, NULL, input_f, (void *)input);
+    if(tid_input != 0) {
+        perror("thread creation error: ");
+    }
+
+    tid_simul = pthread_create(&simul_t, NULL, simul_f, (void *)simul);
+    if(tid_simul != 0) {
+        perror("thread creation error: ");
+    }
+
+    pthread_join(input_t, NULL);
+    pthread_join(simul_t, NULL);
+
+    free(simul);
+    free(input->floor_input);
+    free(input->menu_input);
+    free(input);
 
     return 0;
 }
 
+void allocate(Input **input, Simul **simul) {
+    *input = (Input *)malloc(sizeof(Input));
+    (*input)->menu_input = (char *)malloc(sizeof(char));
+    (*input)->floor_input = (int *)malloc(sizeof(int));
+    *simul = (Simul *)malloc(sizeof(Simul));
+    (*simul)->input = *input;
+}
+
+void *input_f(void *data) {
+    Input *input = (Input *)data;
+    while(*input->menu_input != 'Q') {
+        *input->menu_input = get_menu_input();
+    }
+}
+
+void *simul_f(void *data) {
+    Simul *simul = (Simul *)data;
+    init(simul->elevators);
+    while(*simul->input->menu_input != 'Q') {
+        //print_UI();
+        print_elevator_info(simul->elevators);
+        print_menu();
+
+        switch(*simul->input->menu_input) {
+            case 'Q':
+                quit(simul->elevators);
+                break;
+            case 'W':
+                break;
+            case 'E':
+                break;
+            case 'R':
+                break;
+            case 'A':
+                break;
+            default:
+                printf("잘못된 입력입니다. \n");
+        }
+
+    }
+}
+
+void init(Elevator *elevators[6]) {
+    int i, j;
+    for(i = 0; i < NUM_ELEVATORS; i++) {
+        elevators[i] = (Elevator *)malloc(sizeof(Elevator));
+    }
+    for(i = 0; i < NUM_ELEVATORS; i++) {
+        //노드 동적할당
+        elevators[i]->reqs.front = (Node *)malloc(sizeof(Node));
+        elevators[i]->reqs.rear = (Node *)malloc(sizeof(Node));
+
+        //엘리베이터 별로 다르게 층 초기화
+        if(i < 2) {
+            for(j = 0; j < 10; j++) {
+                elevators[i]->floor[j] = 1;
+            }
+        } else if(i < 4) {
+            for(j = 10; j < FLOOR; j++) {
+                elevators[i]->floor[j] = 1;
+            }
+        } else {
+            for(j = 0; j < FLOOR; j++) {
+                elevators[i]->floor[j] = 1;
+            }
+        }
+
+        //다른 변수들 초기값 설정
+        elevators[i]->is_moving = 0;
+        elevators[i]->curr_people = 0;
+        elevators[i]->total_people = 0;
+        elevators[i]->fix = 0;
+    }
+}
+
+void print_elevator_info(Elevator *elevators[6]) {
+    int i;
+
+    system("clear");
+    for(i = 0; i < NUM_ELEVATORS; i++) {
+        printf("엘리베이터 %d : ", i + 1);
+        if(elevators[i]->is_moving == 0) {
+            printf("대기 중. ");
+        } else {
+            //TODO further implementataion regarding requests
+            printf("%d명 탑승 중. ", elevators[i]->curr_people);
+        }
+        printf("누적 승객 수 : %d \n", elevators[i]->total_people);
+    }
+}
+
 void print_menu() {
-    printf("-----MENU----- \n");
-    printf("Q : 종료       \n");
+    printf("-----------MENU------------ \n");
+    printf("Q : 종료       \t");
     printf("W : 정지       \n");
-    printf("E : 재개       \n");
+    printf("E : 재개       \t");
     printf("R : 재시작     \n");
     printf("A : 호출       \n");
-    printf("-------------- \n");
+    printf("--------------------------- \n");
+    sleep(1);
 }
+
+char get_menu_input() {
+    char input;
+    printf("메뉴 선택 : ");
+    scanf(" %c", &input);
+    return input;
+}
+
+void quit(Elevator *elevators[6]) {
+    int i;
+
+    printf("엘리베이터 시뮬레이션 시스템을 종료합니다. \n");
+    for(i = NUM_ELEVATORS - 1; i >= 0; i--) {
+        free(elevators[i]->reqs.rear);
+        free(elevators[i]->reqs.front);
+    }
+
+    for(i = NUM_ELEVATORS - 1; i >= 0; i--) {
+        free(elevators[i]);
+    }
+
+    //TODO modification
+    exit(0);
+}
+
+//TODO implementation of stop, resume, and restart
