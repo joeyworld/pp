@@ -4,6 +4,11 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#define QUIT 'Q'
+#define PAUSE 'W'
+#define RESUME 'E'
+#define RESTART 'R'
+#define CALL 'A'
 #define FLOOR 20
 #define NUM_ELEVATORS 6
 
@@ -50,6 +55,7 @@ typedef struct _SIMUL {
 }Simul;
 
 /* 함수 헤더 */
+void gotoxy(int x, int y);
 void *input_f(void *data); //input_t thread에서 실행되는 함수
 void *simul_f(void *data); //simul_t thread에서 실행되는 함수
 void allocate(Input **input, Simul **simul); //동적할당 처리
@@ -58,6 +64,7 @@ void print_elevator_info(Elevator *elevators[6]);
 void print_menu();
 char get_menu_input();
 void quit(Elevator *elevators[6]);
+void simul_stop(char *mode);
 
 int main(void) {
     Input *input;
@@ -106,10 +113,14 @@ void *input_f(void *data) {
 }
 
 void *simul_f(void *data) {
+    int time = 0;
+    char mode;
     Simul *simul = (Simul *)data;
     init(simul->elevators);
     while(*simul->input->menu_input != 'Q') {
+        system("clear");
         //print_UI();
+        printf("시뮬레이션 시작한 지 %d 초 경과 \n", time);
         print_elevator_info(simul->elevators);
         print_menu();
 
@@ -118,6 +129,7 @@ void *simul_f(void *data) {
                 quit(simul->elevators);
                 break;
             case 'W':
+                simul_stop(simul->input->menu_input);
                 break;
             case 'E':
                 break;
@@ -125,10 +137,10 @@ void *simul_f(void *data) {
                 break;
             case 'A':
                 break;
-            default:
-                printf("잘못된 입력입니다. \n");
         }
 
+        time++;
+        sleep(1);
     }
 }
 
@@ -168,7 +180,6 @@ void init(Elevator *elevators[6]) {
 void print_elevator_info(Elevator *elevators[6]) {
     int i;
 
-    system("clear");
     for(i = 0; i < NUM_ELEVATORS; i++) {
         printf("엘리베이터 %d : ", i + 1);
         if(elevators[i]->is_moving == 0) {
@@ -189,12 +200,12 @@ void print_menu() {
     printf("R : 재시작     \n");
     printf("A : 호출       \n");
     printf("--------------------------- \n");
-    sleep(1);
+    printf("메뉴 선택 : ");
+    fflush(stdout);
 }
 
 char get_menu_input() {
     char input;
-    printf("메뉴 선택 : ");
     scanf(" %c", &input);
     return input;
 }
@@ -217,3 +228,13 @@ void quit(Elevator *elevators[6]) {
 }
 
 //TODO implementation of stop, resume, and restart
+void simul_stop(char *mode) {
+    while(*mode != RESUME && *mode != QUIT) {
+        sleep(1);
+    }
+}
+
+void gotoxy(int x, int y) {
+    printf("\033[%d;%df", y, x);
+    fflush(stdout);
+}
