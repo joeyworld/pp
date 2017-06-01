@@ -65,6 +65,7 @@ void print_menu();
 char get_menu_input();
 void quit(Elevator *elevators[6]);
 void simul_stop(char *mode);
+void simul_restart(int *time, Simul *simul);
 
 int main(void) {
     Input *input;
@@ -114,29 +115,23 @@ void *input_f(void *data) {
 
 void *simul_f(void *data) {
     int time = 0;
-    char mode;
     Simul *simul = (Simul *)data;
     init(simul->elevators);
-    while(*simul->input->menu_input != 'Q') {
+    while(1) {
         system("clear");
         //print_UI();
         printf("시뮬레이션 시작한 지 %d 초 경과 \n", time);
         print_elevator_info(simul->elevators);
         print_menu();
 
-        switch(*simul->input->menu_input) {
-            case 'Q':
-                quit(simul->elevators);
-                break;
-            case 'W':
-                simul_stop(simul->input->menu_input);
-                break;
-            case 'E':
-                break;
-            case 'R':
-                break;
-            case 'A':
-                break;
+        if(*simul->input->menu_input == QUIT) {
+            quit(simul->elevators);
+        } else if(*simul->input->menu_input == PAUSE) {
+            simul_stop(simul->input->menu_input);
+        } else if(*simul->input->menu_input == RESTART) {
+            simul_restart(&time, simul);
+            continue;
+        } else if(*simul->input->menu_input == CALL) {
         }
 
         time++;
@@ -232,6 +227,19 @@ void simul_stop(char *mode) {
     while(*mode != RESUME && *mode != QUIT) {
         sleep(1);
     }
+}
+
+void simul_restart(int *time, Simul *simul) {
+    int i;
+    for(i = 0; i < NUM_ELEVATORS; i++) {
+        simul->elevators[i]->is_moving = 0;
+        simul->elevators[i]->curr_people = 0;
+        simul->elevators[i]->total_people = 0;
+        simul->elevators[i]->fix = 0;
+    }
+
+    *time = 0;
+    *simul->input->menu_input = 0;
 }
 
 void gotoxy(int x, int y) {
