@@ -1,2 +1,5 @@
 *.out
 *.dSYM/
+*.docx
+*.exe
+*.swp
