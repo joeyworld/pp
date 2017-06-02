@@ -81,11 +81,6 @@ typedef struct _SIMUL {
     Input *input;
 }Simul;
 
-/* 전역 변수 */
-R_list up;
-R_list down;
-int flag = 0;
-
 /* 함수 헤더 */
 int getch(void);
 void init(Input **input, Simul **simul, Elevator *elevators[6]);
@@ -100,6 +95,20 @@ void simul_restart(int *time, Simul *simul);
 void get_request(Input *input);
 void insert_into_queue(int current_floor, int dest_floor, int num_people);
 void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people);
+int R_list_size(R_list list);
+Request *remove_from_request(R_list list);
+void accept_request(int start_floor, int dest_floor, int num_people);
+void add_into_building(P_list list, int dest_floor, int num_people);
+Elevator *find_elevator(Elevator *elevators[6], R_list list);
+int num_pending(F_list list);
+void insert_floor(Elevator *elevator, int floor);
+void move_elevator(Elevator *elevators[6]);
+People *ride(P_list list);
+
+/* 전역 변수 */
+P_list building[20];
+R_list reqs;
+int flag = 0;
 
 int main(void) {
     Input *input;
@@ -111,6 +120,22 @@ int main(void) {
     int tid_simul;
 
     init(&input, &simul, elevators);
+
+    //test
+    flag = 1;
+    insert_into_queue(4, 11, 5);
+    flag = 1;
+    insert_into_queue(13, 18, 7);
+    flag = 1;
+    insert_into_queue(9, 2, 4);
+    flag = 1;
+    insert_into_queue(20, 12, 11);
+    flag = 1;
+    insert_into_queue(1, 5, 2);
+    flag = 1;
+    insert_into_queue(18, 7, 10);
+    flag = 0;
+    //test end
 
     tid_input = pthread_create(&input_thr, NULL, input_f, (void *)input);
     if(tid_input != 0) {
@@ -132,14 +157,12 @@ int main(void) {
 
 void init(Input **input, Simul **simul, Elevator *elevators[6]) {
     int i, j;
-    up.head = (R_node *)malloc(sizeof(R_node));
-    up.tail = (R_node *)malloc(sizeof(R_node));
-    down.head = (R_node *)malloc(sizeof(R_node));
-    down.tail = (R_node *)malloc(sizeof(R_node));
-    up.head->next = up.tail;
-    up.tail->prev = up.head;
-    down.head->next = down.tail;
-    down.tail->prev = down.head;
+    reqs.head = (R_node *)malloc(sizeof(R_node));
+    reqs.tail = (R_node *)malloc(sizeof(R_node));
+    reqs.head->prev = NULL;
+    reqs.head->next = reqs.tail;
+    reqs.tail->prev = reqs.head;
+    reqs.tail->next = NULL;
 
     *input = (Input *)malloc(sizeof(Input));
     (*input)->mode = (char *)malloc(sizeof(char));
@@ -150,6 +173,15 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
     *simul = (Simul *)malloc(sizeof(Simul));
     (*simul)->input = *input;
 
+    for(i = 0; i < FLOOR; i++) {
+        building[i].head = (P_node *)malloc(sizeof(P_node));
+        building[i].tail = (P_node *)malloc(sizeof(P_node));
+        building[i].head->prev = NULL;
+        building[i].head->next = building[i].tail;
+        building[i].tail->prev = building[i].head;
+        building[i].tail->next = NULL;
+    }
+
     for(i = 0; i < NUM_ELEVATORS; i++) {
         elevators[i] = (Elevator *)malloc(sizeof(Elevator));
     }
@@ -159,8 +191,10 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
         elevators[i]->pending.tail = (F_node *)malloc(sizeof(F_node));
         elevators[i]->pending.head->floor = 0;
         elevators[i]->pending.tail->floor = 0;
+        elevators[i]->pending.head->prev = NULL;
         elevators[i]->pending.head->next = elevators[i]->pending.tail;
         elevators[i]->pending.tail->prev = elevators[i]->pending.head;
+        elevators[i]->pending.tail->next = NULL;
 
         elevators[i]->current_floor = 1;
         elevators[i]->next_dest = 1;
@@ -206,10 +240,15 @@ void *simul_f(void *data) {
             continue;
         }
 
-        //요청 큐에 추가
+        //요청 큐에 추가 & 건물 정보 업데이트
         insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor, *simul->input->req_num_people);
         
-        //엘리베이터 이동시키기
+        //엘리베이터 찾기 및 이동
+        if(R_list_size(reqs) != 0) {
+            find_elevator(simul->elevators, reqs);
+        }
+
+        move_elevator(simul->elevators);
 
         time++;
         sleep(1);
@@ -218,43 +257,51 @@ void *simul_f(void *data) {
 
 void print_UI(Elevator *elevators[6]) {
     int i, j;
+    P_node *curr;
     for(i = 0; i < FLOOR; i++) {
-        printf("    ------------------------------------------------------ \n"); //윗칸
+        printf("    ------------------------------------------------------------ \n"); //윗칸
         printf("%2dF ", FLOOR - i);
         for(j = 0; j < NUM_ELEVATORS; j++) {
             if(elevators[j]->current_floor == FLOOR - i) {
                 printf("|");
-                if(elevators[j]->direction == 0) {
-                    printf(" 대기중 ");
-                } else {
+                if(elevators[j]->current_floor - elevators[j]->next_dest == 0) {
+                    printf(" 대기중  ");
+                } else if(elevators[j]->current_floor - elevators[j]->next_dest > 0) {
+                    printf(" ▼");
+                    printf(" %dF", elevators[j]->next_dest);
                     //TODO further implementation when moving
+                } else {
+                    printf("▲ ");
+                    printf(" %dF ", elevators[j]->next_dest);
                 }
+
+                printf("%d명", elevators[j]->curr_people);
             } else {
-                printf("|        ");
+                printf("|         ");
             }
         }
-        printf("| \n");
+        printf("| ");
+
+        printf("대기인원: ");
+        curr = building[FLOOR - i - 1].head->next;
+        while(curr != building[FLOOR -i -1].tail) {
+            printf("%d층으로 %d명, ", curr->p.dest, curr->p.number);
+            curr = curr->next;
+        }
+
+        printf("\n");
     }
-    printf("    ------------------------------------------------------ \n"); //아랫칸
+    printf("    ------------------------------------------------------------ \n"); //아랫칸
 }
 
 void print_elevator_info(Elevator *elevators[6]) {
     int i;
-    R_node *curr1 = up.head->next;
-    R_node *curr2 = down.head->next;
+    R_node *curr = reqs.head->next;
 
-    printf("상행 요청: ");
-    while(curr1 != up.tail) {
-        printf("%d층 -> %d층 %d명, ", curr1->req.start_floor, curr1->req.dest_floor, curr1->req.num_people);
-        curr1 = curr1->next;
-    }
-
-    printf("\n");
-
-    printf("하행 요청: ");
-    while(curr2 != down.tail) {
-        printf("%d층 -> %d층 %d명, ", curr2->req.start_floor, curr2->req.dest_floor, curr2->req.num_people);
-        curr2 = curr2->next;
+    printf("현재 요청: ");
+    while(curr != reqs.tail) {
+        printf("%d층 -> %d층 %d명, ", curr->req.start_floor, curr->req.dest_floor, curr->req.num_people);
+        curr = curr->next;
     }
 
     printf("\n");
@@ -273,19 +320,16 @@ void print_elevator_info(Elevator *elevators[6]) {
 
 void print_menu(char mode, Input *input) {
     if(mode == CALL) {
-        printf("\n------엘리베이터 호출 모드------ \n");
+        printf("\n엘리베이터 호출 모드\n");
         printf("현재 층 : %d, 목적 층 : %d, 사람 수 : %d \n", *input->req_current_floor, *input->req_dest_floor, *input->req_num_people);
         printf("h : 현재 층 증가, j : 목적 층 증가, k : 사람 수 증가 \n");
         printf("입력을 완료하려면 l를 누르십시오 \n");
-        printf("-------------------------------- \n");
     } else {
-        printf("\n-----------MENU------------ \n");
-        printf("Q : 종료       \t");
-        printf("W : 정지       \n");
-        printf("E : 재개       \t");
-        printf("R : 재시작     \n");
-        printf("A : 호출       \n");
-        printf("--------------------------- \n");
+        printf("Q : 종료\t");
+        printf("W : 정지\t");
+        printf("E : 재개\t");
+        printf("R : 재시작\t");
+        printf("A : 호출\n");
         printf("메뉴 선택 : ");
     }
     fflush(stdout);
@@ -324,6 +368,7 @@ void simul_restart(int *time, Simul *simul) {
 
     *time = 0;
     *simul->input->mode = 0;
+    //queue destroy
 }
 
 void get_request(Input *input) {
@@ -368,24 +413,176 @@ void insert_into_queue(int current_floor, int dest_floor, int num_people) {
         return;
     }
 
-    if(dest_floor - current_floor > 0) {
-        R_list_insert(up, current_floor, dest_floor, num_people);
-    } else if(dest_floor - current_floor < 0) {
-        R_list_insert(down, current_floor, dest_floor, num_people);
+    if(current_floor == dest_floor) {
+        return;
     }
+
+    if(current_floor > FLOOR || current_floor < 1 || dest_floor > FLOOR || dest_floor < 1) {
+        return;
+    }
+
+    R_list_insert(reqs, current_floor, dest_floor, num_people);
+    accept_request(current_floor, dest_floor, num_people);
 
     flag = 0;
 }
 
 void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people) {
     R_node *new_node = (R_node *)malloc(sizeof(R_node));
-    new_node->prev = list.head;
-    new_node->next = list.head->next;
+    new_node->prev = list.tail->prev;
+    new_node->next = list.tail;
     new_node->prev->next = new_node;
     new_node->next->prev = new_node;
     new_node->req.start_floor = current_floor;
     new_node->req.dest_floor = dest_floor;
     new_node->req.num_people = num_people;
+}
+
+int R_list_size(R_list list) {
+    int size = 0;
+    R_node *curr = list.head->next;
+    while(curr != list.tail) {
+        size++;
+        curr = curr->next;
+    }
+
+    return size;
+}
+
+Request *remove_from_request(R_list list) {
+    R_node *to_remove = list.head->next;
+    Request *ret = &to_remove->req;
+
+    to_remove->prev->next = to_remove->next;
+    to_remove->next->prev = to_remove->prev;
+    to_remove->next = NULL;
+    to_remove->prev = NULL;
+
+    free(to_remove);
+    return ret;
+}
+
+void accept_request(int start_floor, int dest_floor, int num_people) {
+    add_into_building(building[start_floor - 1], dest_floor, num_people);
+}
+
+void add_into_building(P_list list, int dest_floor, int num_people) {
+    P_node *new_node = (P_node *)malloc(sizeof(P_node));
+    new_node->next = list.tail;
+    new_node->prev = new_node->next->prev;
+    new_node->prev->next = new_node;
+    new_node->next->prev = new_node;
+    new_node->p.number = num_people;
+    new_node->p.dest = dest_floor;
+}
+
+Elevator *find_elevator(Elevator *elevators[6], R_list list) {
+    Request *oldest = remove_from_request(list);
+    Elevator *to_move;
+    int i;
+    int num_q[6] = {0};
+    int min_q;
+    int target_floor = oldest->start_floor;
+    int dest_floor = oldest->dest_floor;
+
+    if((target_floor > 10 && dest_floor <= 10) || (target_floor <= 10 && dest_floor > 10)) {
+        num_q[2] = num_pending(elevators[2]->pending);
+        num_q[3] = num_pending(elevators[3]->pending);
+        if(num_q[2] >= num_q[3]) {
+            to_move = elevators[2];
+        } else {
+            to_move = elevators[3];
+        }
+    } else if(target_floor > 10) {
+        for(i = 5; i > 1; i--) {
+            num_q[i] = num_pending(elevators[i]->pending);
+        }
+        min_q = 5;
+        for(i = 4; i > 1; i--) {
+           if(num_q[i] < num_q[min_q]) {
+               min_q = i;
+           }
+        }
+        to_move = elevators[min_q];
+    } else {
+        for(i = 0; i < 4; i++) {
+            num_q[i] = num_pending(elevators[i]->pending);
+        }
+        min_q = 0;
+        for(i = 0; i < 4; i++) {
+           if(num_q[i] < num_q[min_q]) {
+               min_q = i;
+           }
+        }
+        to_move = elevators[min_q];
+    }
+
+    insert_floor(to_move, target_floor);
+    return to_move;
+}
+
+int num_pending(F_list list) {
+    F_node *curr = list.head->next;
+    int num = 0;
+
+    while(curr != list.tail) {
+        num++;
+        curr = curr->next;
+    }
+
+    return num;
+}
+
+void insert_floor(Elevator *elevator, int floor) {
+    F_node *new_node = (F_node *)malloc(sizeof(F_node));
+    new_node->next = elevator->pending.tail;
+    new_node->prev = new_node->next->prev;
+    new_node->prev->next = new_node;
+    new_node->next->prev = new_node;
+    new_node->floor = floor;
+}
+
+void move_elevator(Elevator *elevators[6]) {
+    int i;
+    for(i = 0; i < NUM_ELEVATORS; i++) {
+        //새 목적층 설정
+        if((elevators[i]->next_dest != elevators[i]->pending.head->next->floor) && (num_pending(elevators[i]->pending) != 0)) {
+            elevators[i]->next_dest = elevators[i]->pending.head->next->floor;
+        }
+
+        //움직임 구현
+        if(elevators[i]->current_floor != elevators[i]->next_dest) {
+            if(elevators[i]->current_floor > elevators[i]->next_dest) {
+                elevators[i]->direction = -1;
+            } else {
+                elevators[i]->direction = 1;
+            }
+            elevators[i]->current_floor += elevators[i]->direction;
+        } else {
+            elevators[i]->direction = 0;
+        }
+        //TODO further implementation
+        //사람 태우고 내리기
+        if(elevators[i]->current_floor == elevators[i]->next_dest) {
+            elevators[i]->curr_people += building[elevators[i]->current_floor - 1].head->next->p.number;
+            elevators[i]->next_dest = building[elevators[i]->current_floor - 1].head->next->p.dest;
+            ride(building[elevators[i]->current_floor - 1]);
+
+        }
+    }
+}
+
+People *ride(P_list list) {
+    P_node *to_remove = list.head->next;
+    People *ret = &to_remove->p;
+
+    to_remove->prev->next = to_remove->next;
+    to_remove->next->prev = to_remove->prev;
+    to_remove->next = NULL;
+    to_remove->prev = NULL;
+
+    free(to_remove);
+    return ret;
 }
 
 int getch(void) {
