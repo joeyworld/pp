@@ -567,7 +567,7 @@ void move_elevator(Elevator *elevators[6]) {
     int i;
     int available; //정원이 초과될 시 최대로 태울수 있는 사람 수
     int leftover; // 못 타고 남아있는 사람 수
-    F_node *temp;
+    F_node *next_floor;
     // 1. 다음 목적지를 구한다(있으면)
     // 2. 현재 층과 비교햐여,
     // 3. 높으면 현재층 증가, 낮으면 감소, 같으면 정지!
@@ -580,31 +580,31 @@ void move_elevator(Elevator *elevators[6]) {
             (elevators[i]->current_floor)--;
         } else {
             if(F_list_size(elevators[i]->pending) > 1) {
-                temp = F_list_peek(elevators[i]->pending);
+                next_floor = F_list_peek(elevators[i]->pending);
                 available = MAX_PEOPLE - elevators[i]->current_people;
 
-                if(available < temp->people) {
+                if(available < next_floor->people) {
                     elevators[i]->current_people += available;
                     elevators[i]->total_people += available;
-                    leftover = temp->people - available;
+                    leftover = next_floor->people - available;
 
                     F_list_remove(elevators[i]->pending);
-                    temp = F_list_peek(elevators[i]->pending);
-                    temp->people = available * -1;
-                    elevators[i]->next_dest = temp->floor;
-                    R_list_insert(reqs, elevators[i]->current_floor, temp->floor, leftover);
+                    next_floor = F_list_peek(elevators[i]->pending);
+                    next_floor->people = available * -1;
+                    elevators[i]->next_dest = next_floor->floor;
+                    R_list_insert(reqs, elevators[i]->current_floor, next_floor->floor, leftover);
                 } else {
-                    elevators[i]->current_people += temp->people;
-                    if(temp->people > 0) {
-                        elevators[i]->total_people += temp->people;
+                    elevators[i]->current_people += next_floor->people;
+                    if(next_floor->people > 0) {
+                        elevators[i]->total_people += next_floor->people;
                     }
                     F_list_remove(elevators[i]->pending);
-                    temp = F_list_peek(elevators[i]->pending);
-                    elevators[i]->next_dest = temp->floor;
+                    next_floor = F_list_peek(elevators[i]->pending);
+                    elevators[i]->next_dest = next_floor->floor;
                 }
             } else if(F_list_size(elevators[i]->pending) == 1) {
-                temp = F_list_peek(elevators[i]->pending);
-                elevators[i]->current_people += temp->people;
+                next_floor = F_list_peek(elevators[i]->pending);
+                elevators[i]->current_people += next_floor->people;
                 F_list_remove(elevators[i]->pending);
             }
         }
