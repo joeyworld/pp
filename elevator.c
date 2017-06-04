@@ -83,7 +83,7 @@ void get_request(Input *input);
 void insert_into_queue(int current_floor, int dest_floor, int num_people);
 Elevator *find_elevator(Elevator *elevators[6], Request *current);
 F_node *find_ideal_location(F_node *v, int start_floor, int dest_floor, int target);
-int find_time(F_list list, F_node *target, int start);
+int find_time(F_list list, F_node *target, int start, int end);
 int find_min(int *arr, int n);
 void move_elevator(Elevator *elevators[6]);
 void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people);
@@ -113,13 +113,9 @@ int main(void) {
 
     //테스트
     flag = 1;
-    insert_into_queue(4, 11, 5);
+    insert_into_queue(4, 18, 13);
     flag = 1;
-    insert_into_queue(12, 20, 4);
-    flag = 1;
-    insert_into_queue(1, 4, 3);
-    flag = 1;
-    insert_into_queue(8, 2, 6);
+    insert_into_queue(8, 20, 6);
     //테스트 종료
 
     tid_input = pthread_create(&input_thr, NULL, input_f, (void *)input);
@@ -455,7 +451,8 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current) {
         time_required = (int *)malloc(sizeof(int) * 2);
         for(i = 0; i < 2; i++) {
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
-            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor);
+            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     } else if(current->start_floor > 10 || current->dest_floor > 10) {
         s = 2;
@@ -463,14 +460,16 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current) {
         time_required = (int *)malloc(sizeof(int) * 4);
         for(i = 0; i < 4; i++) {
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
-            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor);
+            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     } else {
         ideal = (F_node **)malloc(sizeof(F_node *) * 4);
         time_required = (int *)malloc(sizeof(int) * 4);
         for(i = 0; i < 4; i++) {
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
-            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor);
+            time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     }
 
@@ -527,27 +526,31 @@ F_node *find_ideal_location(F_node *v, int start_floor, int dest_floor, int targ
     }
 }
 
-int find_time(F_list list, F_node *target, int start) {
+int find_time(F_list list, F_node *target, int start, int end) {
     int time = 0;
     F_node *temp = target;
     int curr = start;
 
     if(temp == list.tail) {
-        return 0;
+        return end - start;
     }
 
-    while(temp != list.tail) {
-        time += abs(temp->floor - start);
+    while(temp != target) {
+        time += abs(temp->floor - curr);
         curr = temp->floor;
         temp = temp->next;
     }
+
+    time += abs(end - curr);
+
+    return time;
 }
 
 int find_min(int *arr, int n) {
     // 우선순위 규칙
     // 1. 시간이 최소로 걸리는 엘리베이터
     // 2. 운행 범위가 좁은 엘리베이터(저층 > 전층)
-    // 3. 현재 사람 수가 적은 엘리베이터
+    // 3. 현재 사람 수가 적은 엘리베이터(이미 만원인 엘리베이터는 제외)
     // 4. 인덱스가 적은 엘리베이터
     int i;
     int min = 0;
@@ -562,13 +565,14 @@ int find_min(int *arr, int n) {
 
 void move_elevator(Elevator *elevators[6]) {
     int i;
+    int available; //정원이 초과될 시 최대로 태울수 있는 사람 수
+    int leftover; // 못 타고 남아있는 사람 수
     F_node *temp;
     // 1. 다음 목적지를 구한다(있으면)
     // 2. 현재 층과 비교햐여,
     // 3. 높으면 현재층 증가, 낮으면 감소, 같으면 정지!
-    // 4. 같으면 사람을 태운다.
+    // 4. 같으면 사람을 태운다. 사람을 다 못 태우면 최대 수용 가능 인원만 태운다.
 
-    //사람 태우고 내리는 추가 구현 필요!
     for(i = 0; i < NUM_ELEVATORS; i++) {
         if(elevators[i]->next_dest > elevators[i]->current_floor) {
             (elevators[i]->current_floor)++;
@@ -577,16 +581,30 @@ void move_elevator(Elevator *elevators[6]) {
         } else {
             if(F_list_size(elevators[i]->pending) > 1) {
                 temp = F_list_peek(elevators[i]->pending);
-                // 사람 태우기
-                elevators[i]->current_people += temp->people;
-                //사람을 태운 경우에만 누적을 증가시켜야 함
-                if(temp->people > 0) {
-                    elevators[i]->total_people += temp->people;
+                available = MAX_PEOPLE - elevators[i]->current_people;
+
+                if(available < temp->people) {
+                    elevators[i]->current_people += available;
+                    elevators[i]->total_people += available;
+                    leftover = temp->people - available;
+
+                    F_list_remove(elevators[i]->pending);
+                    temp = F_list_peek(elevators[i]->pending);
+                    temp->people = available * -1;
+                    elevators[i]->next_dest = temp->floor;
+                    R_list_insert(reqs, elevators[i]->current_floor, temp->floor, leftover);
+                } else {
+                    elevators[i]->current_people += temp->people;
+                    if(temp->people > 0) {
+                        elevators[i]->total_people += temp->people;
+                    }
+                    F_list_remove(elevators[i]->pending);
+                    temp = F_list_peek(elevators[i]->pending);
+                    elevators[i]->next_dest = temp->floor;
                 }
-                F_list_remove(elevators[i]->pending);
-                temp = F_list_peek(elevators[i]->pending);
-                elevators[i]->next_dest = temp->floor;
             } else if(F_list_size(elevators[i]->pending) == 1) {
+                temp = F_list_peek(elevators[i]->pending);
+                elevators[i]->current_people += temp->people;
                 F_list_remove(elevators[i]->pending);
             }
         }
