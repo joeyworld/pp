@@ -13,11 +13,14 @@
 #define CALL 'A'
 #define FLOOR 20
 #define NUM_ELEVATORS 6
+#define MAX_PEOPLE 15 // 엘리베이터 정원
+#define MAX_TOTAL 150 // 점검 받아야하는 수
 
 /* 요청 구조체 */
 typedef struct _REQUEST {
     int start_floor; //현재층(요청이 이루어지는)
     int dest_floor; //목적층
+    int num_people; //몇 명이 타는지
 }Request;
 
 typedef struct _FLOORNODE {
@@ -46,7 +49,8 @@ typedef struct _REQUESTLIST {
 typedef struct _ELEVATOR {
     int current_floor;
     int next_dest;
-    int direction;
+    int current_people;
+    int total_people;
     int fix;
     F_list pending;
 }Elevator;
@@ -55,6 +59,7 @@ typedef struct _INPUT {
     char *mode;
     int *req_current_floor;
     int *req_dest_floor;
+    int *req_num_people;
 }Input;
 
 typedef struct _SIMUL {
@@ -74,13 +79,13 @@ void quit(Elevator *elevators[6]);
 void simul_stop(char *mode);
 void simul_restart(int *time, Simul *simul);
 void get_request(Input *input);
-void insert_into_queue(int current_floor, int dest_floor);
+void insert_into_queue(int current_floor, int dest_floor, int num_people);
 Elevator *find_elevator(Elevator *elevators[6], Request *current);
 F_node *find_ideal_location(F_node *v, int start_floor, int dest_floor, int target);
 int find_time(F_list list, F_node *target, int start);
 int find_min(int *arr, int n);
 void move_elevator(Elevator *elevators[6]);
-void R_list_insert(R_list list, int current_floor, int dest_floor);
+void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people);
 int R_list_size(R_list list);
 Request *R_list_remove(R_list list);
 void F_list_insert(F_list list, F_node *after, int floor);
@@ -135,6 +140,7 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
     (*input)->mode = (char *)malloc(sizeof(char));
     (*input)->req_current_floor = (int *)malloc(sizeof(int));
     (*input)->req_dest_floor = (int *)malloc(sizeof(int));
+    (*input)->req_num_people = (int *)malloc(sizeof(int));
 
     *simul = (Simul *)malloc(sizeof(Simul));
     (*simul)->input = *input;
@@ -156,10 +162,12 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
 
         elevators[i]->current_floor = 1;
         elevators[i]->next_dest = 1;
-        elevators[i]->direction = 0;
+        elevators[i]->current_people = 0;
+        elevators[i]->total_people = 0;
         elevators[i]->fix = 0;
     }
 
+    // 고층 엘리베이터는 처음 11층에 멈춰있음
     elevators[4]->current_floor = 11;
     elevators[4]->next_dest = 11;
     elevators[5]->current_floor = 11;
@@ -206,7 +214,7 @@ void *simul_f(void *data) {
         }
 
         //요청 큐에 추가 & 건물 정보 업데이트
-        insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor);
+        insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor, *simul->input->req_num_people);
 
         if(R_list_size(reqs) != 0) {
             current = *R_list_remove(reqs);
@@ -270,7 +278,7 @@ void print_elevator_info(Elevator *elevators[6]) {
 
     printf("현재 요청: ");
     while(curr != reqs.tail) {
-        printf("%d층 -> %d층, ", curr->req.start_floor, curr->req.dest_floor);
+        printf("%d층 -> %d층 %d명, ", curr->req.start_floor, curr->req.dest_floor, curr->req.num_people);
         curr = curr->next;
     }
 
@@ -278,12 +286,13 @@ void print_elevator_info(Elevator *elevators[6]) {
 
     for(i = 0; i < NUM_ELEVATORS; i++) {
         printf("엘리베이터 %d : ", i + 1);
-        if(elevators[i]->direction == 0) {
-            printf("대기 중. ");
+        if(elevators[i]->current_floor == elevators[i]->next_dest) {
+            printf("대기 중, ");
         } else {
             //TODO further implementataion regarding requests
-            printf("운행 중.");
+            printf("운행 중, ");
         }
+        printf("%d명 탑승 중. ", elevators[i]->current_people);
         printf("방문해야 할 층 : ");
         print_F_list(elevators[i]->pending);
         printf("\n");
@@ -293,8 +302,8 @@ void print_elevator_info(Elevator *elevators[6]) {
 void print_menu(char mode, Input *input) {
     if(mode == CALL) {
         printf("\n엘리베이터 호출 모드\n");
-        printf("현재 층 : %d, 목적 층 : %d\n", *input->req_current_floor, *input->req_dest_floor);
-        printf("h : 현재 층 증가, j : 목적 층 증가\n");
+        printf("현재 층 : %d, 목적 층 : %d, 사람 수 : %d\n", *input->req_current_floor, *input->req_dest_floor, *input->req_num_people);
+        printf("h : 현재 층 증가, j : 목적 층 증가, k : 사람 수 증가 \n");
         printf("입력을 완료하려면 l를 누르십시오 \n");
     } else {
         printf("Q : 종료\t");
@@ -307,6 +316,7 @@ void print_menu(char mode, Input *input) {
     fflush(stdout);
 }
 
+// 모든 메모리 해제하는 수정 필요 - pthread_exit 활용해서 정리함수 구현 필요
 void quit(Elevator *elevators[6]) {
     int i;
 
@@ -324,6 +334,7 @@ void quit(Elevator *elevators[6]) {
     exit(0);
 }
 
+//pthread_mutex 를 이용해서 좀 더 깨끗하게??
 void simul_stop(char *mode) {
     while(*mode != RESUME && *mode != QUIT && *mode != RESTART) {
     }
@@ -334,10 +345,12 @@ void simul_restart(int *time, Simul *simul) {
     for(i = 0; i < NUM_ELEVATORS; i++) {
         simul->elevators[i]->current_floor = 1;
         simul->elevators[i]->next_dest = 1;
-        simul->elevators[i]->direction = 0;
+        simul->elevators[i]->current_people = 0;
+        simul->elevators[i]->total_people = 0;
         simul->elevators[i]->fix = 0;
     }
 
+    // 고층 엘리베이터는 시작 층이 11층
     simul->elevators[4]->current_floor = 11;
     simul->elevators[4]->next_dest = 11;
     simul->elevators[5]->current_floor = 11;
@@ -350,6 +363,7 @@ void simul_restart(int *time, Simul *simul) {
     //빌딩 정보 초기화
 }
 
+// scanf 를 이용해서 구현 불가능?
 void get_request(Input *input) {
     char key;
 
@@ -381,7 +395,8 @@ void get_request(Input *input) {
     flag = 1;
 }
 
-void insert_into_queue(int current_floor, int dest_floor) {
+void insert_into_queue(int current_floor, int dest_floor, int num_people) {
+    //예외처리: flag = 입력을 완료했는가(scanf로 입력 구현하면 불필요)
     if(flag == 0) {
         return;
     }
@@ -394,7 +409,7 @@ void insert_into_queue(int current_floor, int dest_floor) {
         return;
     }
 
-    R_list_insert(reqs, current_floor, dest_floor);
+    R_list_insert(reqs, current_floor, dest_floor, num_people);
 
     flag = 0;
 }
@@ -506,6 +521,11 @@ int find_time(F_list list, F_node *target, int start) {
 }
 
 int find_min(int *arr, int n) {
+    // 우선순위 규칙
+    // 1. 시간이 최소로 걸리는 엘리베이터
+    // 2. 운행 범위가 좁은 엘리베이터(저층 > 전층)
+    // 3. 현재 사람 수가 적은 엘리베이터
+    // 4. 인덱스가 적은 엘리베이터
     int i;
     int min = 0;
     for(i = 1; i < n; i++) {
@@ -516,11 +536,13 @@ int find_min(int *arr, int n) {
     //추가 우선순위에 대한 고려 필요
     return min;
 }
+
 void move_elevator(Elevator *elevators[6]) {
     int i;
     // 1. 다음 목적지를 구한다(있으면)
     // 2. 현재 층과 비교햐여,
     // 3. 높으면 현재층 증가, 낮으면 감소, 같으면 정지!
+    // 4. 같으면 사람을 태운다.
 
     //사람 태우고 내리는 추가 구현 필요!
     for(i = 0; i < NUM_ELEVATORS; i++) {
@@ -536,7 +558,7 @@ void move_elevator(Elevator *elevators[6]) {
     }
 }
 
-void R_list_insert(R_list list, int current_floor, int dest_floor) {
+void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people) {
     R_node *new_node = (R_node *)malloc(sizeof(R_node));
     new_node->next = list.tail;
     new_node->prev = new_node->next->prev;
@@ -544,6 +566,7 @@ void R_list_insert(R_list list, int current_floor, int dest_floor) {
     new_node->next->prev = new_node;
     new_node->req.start_floor = current_floor;
     new_node->req.dest_floor = dest_floor;
+    new_node->req.num_people = num_people;
 }
 
 int R_list_size(R_list list) {
