@@ -206,7 +206,7 @@ void *simul_f(void *data) {
         }
 
         //요청 큐에 추가 & 건물 정보 업데이트
-        //insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor);
+        insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor);
 
         if(R_list_size(reqs) != 0) {
             current = *R_list_remove(reqs);
