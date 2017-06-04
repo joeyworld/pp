@@ -27,6 +27,7 @@ typedef struct _FLOORNODE {
     struct _FLOORNODE *prev;
     struct _FLOORNODE *next;
     int floor;
+    int people; //+ 태운다, - 내린다
 }F_node;
 
 typedef struct _REQUESTNODE {
@@ -88,9 +89,10 @@ void move_elevator(Elevator *elevators[6]);
 void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people);
 int R_list_size(R_list list);
 Request *R_list_remove(R_list list);
-void F_list_insert(F_list list, F_node *after, int floor);
+void F_list_insert(F_list list, F_node *after, int floor, int people);
 int F_list_size(F_list list);
-int F_list_remove(F_list list);
+void F_list_remove(F_list list);
+F_node *F_list_peek(F_list list);
 void print_F_list(F_list list);
 
 
@@ -108,6 +110,17 @@ int main(void) {
     int tid_simul;
 
     init(&input, &simul, elevators);
+
+    //테스트
+    flag = 1;
+    insert_into_queue(4, 11, 5);
+    flag = 1;
+    insert_into_queue(12, 20, 4);
+    flag = 1;
+    insert_into_queue(1, 4, 3);
+    flag = 1;
+    insert_into_queue(8, 2, 6);
+    //테스트 종료
 
     tid_input = pthread_create(&input_thr, NULL, input_f, (void *)input);
     if(tid_input != 0) {
@@ -214,25 +227,28 @@ void *simul_f(void *data) {
         }
 
         //요청 큐에 추가 & 건물 정보 업데이트
-        insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor, *simul->input->req_num_people);
+        // 테스트를 위해서 비활성화
+        //insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor, *simul->input->req_num_people);
 
         if(R_list_size(reqs) != 0) {
             current = *R_list_remove(reqs);
             response = find_elevator(simul->elevators, &current);
 
             // 요청에 응답하는 엘리베이터에 정보 추가하기
+
+            // 사람 태울 층 추가하기
             location = find_ideal_location(response->pending.head->next, current.start_floor, current.dest_floor, current.start_floor);
-            if(location->prev != NULL) {
-                if(current.start_floor != location->prev->floor) {
-                    F_list_insert(response->pending, location, current.start_floor);
-                }
-            }
+            F_list_insert(response->pending, location, current.start_floor, current.num_people);
+
+            //사람 내릴 층 추가하기
             location = find_ideal_location(location->prev, current.start_floor, current.dest_floor, current.dest_floor);
-            if(location->prev != NULL) {
-                if(current.dest_floor != location->prev->floor) {
-                    F_list_insert(response->pending, location, current.dest_floor);
-                }
-            }
+            F_list_insert(response->pending, location, current.dest_floor, current.num_people * -1);
+
+        }
+
+        // 해당 엘리베이터 처음 운행 시 목적층 설정
+        if(response->total_people == 0 && response->current_floor == response->next_dest) {
+            response->next_dest = F_list_peek(response->pending)->floor;
         }
 
         // 엘리베이터 이동시키기
@@ -369,6 +385,7 @@ void get_request(Input *input) {
 
     *input->req_current_floor = 1;
     *input->req_dest_floor = 1;
+    *input->req_num_people = 1;
 
     while(1) {
         key = getch();
@@ -387,6 +404,12 @@ void get_request(Input *input) {
             (*input->req_dest_floor)++;
             if(*input->req_dest_floor > FLOOR) {
                 *input->req_dest_floor = 1;
+            }
+        }
+        if(key == 'k') {
+            (*input->req_num_people)++;
+            if(*input->req_num_people > MAX_PEOPLE) {
+                *input->req_num_people = 1;
             }
         }
 
@@ -539,6 +562,7 @@ int find_min(int *arr, int n) {
 
 void move_elevator(Elevator *elevators[6]) {
     int i;
+    F_node *temp;
     // 1. 다음 목적지를 구한다(있으면)
     // 2. 현재 층과 비교햐여,
     // 3. 높으면 현재층 증가, 낮으면 감소, 같으면 정지!
@@ -551,8 +575,19 @@ void move_elevator(Elevator *elevators[6]) {
         } else if(elevators[i]->next_dest < elevators[i]->current_floor) {
             (elevators[i]->current_floor)--;
         } else {
-            if(F_list_size(elevators[i]->pending) > 0) {
-                elevators[i]->next_dest = F_list_remove(elevators[i]->pending);
+            if(F_list_size(elevators[i]->pending) > 1) {
+                temp = F_list_peek(elevators[i]->pending);
+                // 사람 태우기
+                elevators[i]->current_people += temp->people;
+                //사람을 태운 경우에만 누적을 증가시켜야 함
+                if(temp->people > 0) {
+                    elevators[i]->total_people += temp->people;
+                }
+                F_list_remove(elevators[i]->pending);
+                temp = F_list_peek(elevators[i]->pending);
+                elevators[i]->next_dest = temp->floor;
+            } else if(F_list_size(elevators[i]->pending) == 1) {
+                F_list_remove(elevators[i]->pending);
             }
         }
     }
@@ -593,13 +628,14 @@ Request *R_list_remove(R_list list) {
     return ret;
 }
 
-void F_list_insert(F_list list, F_node *after, int floor) {
+void F_list_insert(F_list list, F_node *after, int floor, int people) {
     F_node *new_node = (F_node *)malloc(sizeof(F_node));
     new_node->next = after;
     new_node->prev = new_node->next->prev;
     new_node->next->prev = new_node;
     new_node->prev->next = new_node;
     new_node->floor = floor;
+    new_node->people = people;
 }
 
 int F_list_size(F_list list) {
@@ -614,9 +650,8 @@ int F_list_size(F_list list) {
     return num;
 }
 
-int F_list_remove(F_list list) {
+void F_list_remove(F_list list) {
     F_node *to_remove = list.head->next;
-    int ret = to_remove->floor;
 
     to_remove->prev->next = to_remove->next;
     to_remove->next->prev = to_remove->prev;
@@ -624,13 +659,16 @@ int F_list_remove(F_list list) {
     to_remove->prev = NULL;
 
     free(to_remove);
-    return ret;
+}
+
+F_node *F_list_peek(F_list list) {
+    return list.head->next;
 }
 
 void print_F_list(F_list list) {
     F_node *curr = list.head->next;
     while(curr != list.tail) {
-        printf("%d ", curr->floor);
+        printf("(%dF %d명) ", curr->floor, curr->people);
         curr = curr->next;
     }
 }
