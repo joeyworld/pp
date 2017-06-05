@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <termios.h>
+#include <limits.h>
 #include <math.h>
 
 #define QUIT            'Q'
@@ -26,7 +27,7 @@ typedef struct _REQUEST {
 typedef struct _FLOORNODE {
     struct _FLOORNODE *prev;
     struct _FLOORNODE *next;
-    int floor;
+    int floor;              // -1 : 점검
     int people;             //+ 태운다, - 내린다
 }F_node;
 
@@ -53,6 +54,7 @@ typedef struct _ELEVATOR {
     int current_people;
     int total_people;
     int fix;
+    int fix_time;
     F_list pending;
 }Elevator;
 
@@ -78,7 +80,7 @@ void print_elevator_info(Elevator *elevators[6]);
 void print_menu(char mode, Input *input);
 void quit(Elevator *elevators[6]);
 void simul_stop(char *mode);
-void simul_restart(int *time, Simul *simul);
+void simul_restart(Simul *simul);
 void get_request(Input *input);
 void insert_into_queue(int current_floor, int dest_floor, int num_people);
 Elevator *find_elevator(Elevator *elevators[6], Request *current);
@@ -86,6 +88,7 @@ F_node *find_ideal_location(F_node *v, int start_floor, int dest_floor, int targ
 int find_time(F_list list, F_node *target, int start, int end);
 int find_min(int *arr, int n);
 void move_elevator(Elevator *elevators[6]);
+void fix_elevator(Elevator *elevator);
 void R_list_insert(R_list list, int current_floor, int dest_floor, int num_people);
 int R_list_size(R_list list);
 Request *R_list_remove(R_list list);
@@ -113,6 +116,11 @@ int main(void) {
 
     //test
     flag = 1;
+    insert_into_queue(1, 8, 13);
+    flag = 1;
+    insert_into_queue(3, 6, 6);
+    /*
+    flag = 1;
     insert_into_queue(11, 15, 5);
     flag = 1;
     insert_into_queue(5, 10, 4);
@@ -126,6 +134,7 @@ int main(void) {
     insert_into_queue(17, 6, 6);
     flag = 1;
     insert_into_queue(9, 12, 4);
+    */
     //test end
 
     tid_input = pthread_create(&input_thr, NULL, input_f, (void *)input);
@@ -184,6 +193,7 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
         elevators[i]->current_people = 0;
         elevators[i]->total_people = 0;
         elevators[i]->fix = 0;
+        elevators[i]->fix_time = 0;
     }
 
     // 고층 엘리베이터는 처음 11층에 멈춰있음
@@ -191,7 +201,6 @@ void init(Input **input, Simul **simul, Elevator *elevators[6]) {
     elevators[4]->next_dest = 11;
     elevators[5]->current_floor = 11;
     elevators[5]->next_dest = 11;
-
 
     (*simul)->elevators = elevators;
 }
@@ -210,6 +219,7 @@ void *input_f(void *data) {
 }
 
 void *simul_f(void *data) {
+    int i;
     Simul *simul = (Simul *)data;
     Elevator *response;             // 요청에 응답하는 엘리베이터
     F_node *location;               // 요청이 들어가는 위치
@@ -237,12 +247,21 @@ void *simul_f(void *data) {
         } else if(*simul->input->mode == PAUSE) {
             simul_stop(simul->input->mode);
         } else if(*simul->input->mode == RESTART) {
-            simul_restart(&time, simul);
+            simul_restart(simul);
             continue;
         }
 
         // 요청 큐에 추가 & 건물 정보 업데이트
         insert_into_queue(*simul->input->req_current_floor, *simul->input->req_dest_floor, *simul->input->req_num_people);
+
+        //점검 필요한 엘리베이터 있으면 점검 요청 넣기(맨 마지막에)
+        for(i = 0; i < NUM_ELEVATORS; i++) {
+            if(simul->elevators[i]->total_people >= MAX_TOTAL) {
+                F_list_insert(simul->elevators[i]->pending, simul->elevators[i]->pending.tail, -1, 0);
+                simul->elevators[i]->total_people = 0;
+            }
+        }
+
 
         if(R_list_size(reqs) != 0) {
             current = *R_list_remove(reqs);
@@ -279,8 +298,10 @@ void print_UI(Elevator *elevators[6]) {
         for(j = 0; j < NUM_ELEVATORS; j++) {
             if(elevators[j]->current_floor == FLOOR - i) {
                 printf("|");
-                if(elevators[j]->current_floor == elevators[j]->next_dest) {
-                    printf(" 멈춤  ");
+                if(elevators[j]->fix) {
+                    printf(" 수리중");
+                } else if(elevators[j]->current_floor == elevators[j]->next_dest) {
+                    printf(" 대기중");
                 } else if(elevators[j]->current_floor > elevators[j]->next_dest) {
                     printf(" ▼");
                     printf(" %2dF ", elevators[j]->next_dest);
@@ -315,12 +336,16 @@ void print_elevator_info(Elevator *elevators[6]) {
 
     for(i = 0; i < NUM_ELEVATORS; i++) {
         printf("엘리베이터 %d | ", i + 1);
-        if(elevators[i]->current_floor == elevators[i]->next_dest) {
+        if(elevators[i]->fix) {
+            printf("수리 중 \n");
+            continue;
+        } else if(elevators[i]->current_floor == elevators[i]->next_dest) {
             printf("대기 중 | ");
         } else {
             printf("운행 중 | ");
         }
         printf("%2d명 탑승 중 | ", elevators[i]->current_people);
+        printf("총 %3d명 탑승 | ", elevators[i]->total_people);
         printf("대기 요청 : ");
         print_F_list(elevators[i]->pending);
         printf("\n");
@@ -368,7 +393,7 @@ void simul_stop(char *mode) {
     }
 }
 
-void simul_restart(int *time, Simul *simul) {
+void simul_restart(Simul *simul) {
     int i;
     for(i = 0; i < NUM_ELEVATORS; i++) {
         simul->elevators[i]->current_floor = 1;
@@ -384,7 +409,6 @@ void simul_restart(int *time, Simul *simul) {
     simul->elevators[5]->current_floor = 11;
     simul->elevators[5]->next_dest = 11;
 
-    *time = 0;
     *simul->input->mode = 0;
 
     //요청 목록 초기화
@@ -457,10 +481,11 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current) {
     int size;
     int s = 0;
 
-    //1. 큐에 요청을 뺀다
-    //2. 각각에 가상의 스케쥴링을 실행한다
-    //3. 각각의 소요시간을 구한다
-    //4. 최소 시간 걸리는 엘리베이터 리턴
+    // 1. 큐에 요청을 뺀다
+    // 2. 각각에 가상의 스케쥴링을 실행한다
+    // 2-1. 점검 요청이 들어와 있으면 소요시간을 최대로 한다
+    // 3. 각각의 소요시간을 구한다
+    // 4. 최소 시간 걸리는 엘리베이터 리턴
 
     if((current->start_floor > 10 && current->dest_floor <= 10) || (current->start_floor <= 10 && current->dest_floor > 10)) {
         s = 2;
@@ -468,9 +493,13 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current) {
         ideal = (F_node **)malloc(sizeof(F_node *) * size);
         time_required = (int *)malloc(sizeof(int) * size);
         for(i = 0; i < 2; i++) {
+            if(elevators[i + s]->pending.tail->prev->floor == -1 || elevators[i + s]->fix == 1) {
+                time_required[i] = INT_MAX;
+                continue;
+            }
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
             time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
-            printf("\n%d번째 엘리베이터 소요시간: %d초", i + s + 1, time_required[i]);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     } else if(current->start_floor > 10 || current->dest_floor > 10) {
         s = 2;
@@ -478,18 +507,26 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current) {
         ideal = (F_node **)malloc(sizeof(F_node *) * size);
         time_required = (int *)malloc(sizeof(int) * size);
         for(i = 0; i < 4; i++) {
+            if(elevators[i + s]->pending.tail->prev->floor == -1 || elevators[i + s]->fix == 1) {
+                time_required[i] = INT_MAX;
+                continue;
+            }
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
             time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
-            printf("\n%d번째 엘리베이터 소요시간: %d초", i + s + 1, time_required[i]);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     } else {
         size = 4;
         ideal = (F_node **)malloc(sizeof(F_node *) * size);
         time_required = (int *)malloc(sizeof(int) * size);
         for(i = 0; i < 4; i++) {
+            if(elevators[i + s]->pending.tail->prev->floor == -1 || elevators[i + s]->fix == 1) {
+                time_required[i] = INT_MAX;
+                continue;
+            }
             ideal[i] = find_ideal_location(elevators[i + s]->pending.head->next, current->start_floor, current->dest_floor, current->start_floor);
             time_required[i] = find_time(elevators[i + s]->pending, ideal[i], elevators[i + s]->current_floor, current->start_floor);
-            printf("\n%d번째 엘리베이터 소요시간: %d초", i + s + 1, time_required[i]);
+            printf("%d번째 엘리베이터 소요시간: %d초 \n", i + s + 1, time_required[i]);
         }
     }
 
@@ -606,9 +643,14 @@ void move_elevator(Elevator *elevators[6]) {
     // (step 4 버그있음ㅜ)
 
     for(i = 0; i < NUM_ELEVATORS; i++) {
-        if(elevators[i]->next_dest > elevators[i]->current_floor) {
+        if(elevators[i]->fix) {
+            fix_elevator(elevators[i]);
+            continue;
+        }
+
+        if(elevators[i]->next_dest > elevators[i]->current_floor && elevators[i]->fix != 1) {
             (elevators[i]->current_floor)++;
-        } else if(elevators[i]->next_dest < elevators[i]->current_floor) {
+        } else if(elevators[i]->next_dest < elevators[i]->current_floor && elevators[i]->fix != 1) {
             (elevators[i]->current_floor)--;
         } else {
             if(F_list_size(elevators[i]->pending) > 1) {
@@ -632,6 +674,12 @@ void move_elevator(Elevator *elevators[6]) {
                     }
                     F_list_remove(elevators[i]->pending);
                     next_floor = F_list_peek(elevators[i]->pending);
+                    if(next_floor->floor == -1) {
+                        F_list_remove(elevators[i]->pending);
+                        elevators[i]->fix = 1;
+                        fix_elevator(elevators[i]);
+                        continue;
+                    }
                     elevators[i]->next_dest = next_floor->floor;
                 }
             } else if(F_list_size(elevators[i]->pending) == 1) {
@@ -640,6 +688,14 @@ void move_elevator(Elevator *elevators[6]) {
                 F_list_remove(elevators[i]->pending);
             }
         }
+    }
+}
+
+void fix_elevator(Elevator *elevator) {
+    (elevator->fix_time)++;
+    if(elevator->fix_time == 30) {
+        elevator->fix = 0;
+        elevator->fix_time = 0;
     }
 }
 
