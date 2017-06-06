@@ -122,27 +122,6 @@ int main(void)
 
     init(&input, &simul, elevators);
 
-    //test
-    flag = 1;
-    insert_into_queue(1, 5, 3);
-    /*
-    flag = 1;
-    insert_into_queue(11, 15, 5);
-    flag = 1;
-    insert_into_queue(5, 10, 4);
-    flag = 1;
-    insert_into_queue(9, 2, 7);
-    flag = 1;
-    insert_into_queue(5, 1, 8);
-    flag = 1;
-    insert_into_queue(3, 18, 2);
-    flag = 1;
-    insert_into_queue(17, 6, 6);
-    flag = 1;
-    insert_into_queue(9, 12, 4);
-    */
-    //test end
-
     tid_input = pthread_create(&input_thr, NULL, input_f, (void *)input);
     if (tid_input != 0)
     {
@@ -238,6 +217,7 @@ void *input_f(void *data)
 
 void *simul_f(void *data)
 {
+    int time = 0;
     int i;
     Simul *simul = (Simul *)data;
     Elevator *response; // 요청에 응답하는 엘리베이터
@@ -257,6 +237,7 @@ void *simul_f(void *data)
         system("clear");
         print_UI(simul->elevators);
         printf("\n");
+        printf("시뮬레이션 시작 후 %d 초 경과 \n", time);
         print_elevator_info(simul->elevators);
         printf("\n");
         print_menu(*simul->input->mode, simul->input);
@@ -293,9 +274,8 @@ void *simul_f(void *data)
         {
             current = *R_list_remove(reqs);
             response = find_elevator(simul->elevators, &current);
-
+            
             // 요청에 응답하는 엘리베이터에 정보 추가하기
-
             // 사람 태울 층 추가하기
             location = find_ideal_location(response, current.start_floor, current.dest_floor, current.start_floor);
             F_list_insert(response->pending, location, current.start_floor, current.num_people);
@@ -308,6 +288,7 @@ void *simul_f(void *data)
         // 엘리베이터 이동시키기
         move_elevator(simul->elevators);
 
+        time++;
         sleep(1);
     }
 }
@@ -652,17 +633,21 @@ F_node *find_scheduled_place(F_node *start, F_node *end, int start_floor, int de
 
 F_node *find_direction_change_location(F_node *current, int current_direction)
 {
+    int new_direction;
     F_node *target = current;
     if (current->next == NULL)
     {
         return current;
     }
 
-    int new_direction;
     while (1)
     {
         target = target->next;
         if (target->next == NULL)
+        {
+            return target;
+        }
+        else if (target->next->next == NULL)
         {
             return target;
         }
@@ -764,23 +749,24 @@ F_node *find_ideal_location(Elevator *elevator, int start_floor, int dest_floor,
 int find_time(F_list list, F_node *target, int start, int end)
 {
     int time = 0;
-    F_node *temp = target;
-    int curr = start;
+    F_node *curr = list.head->next;
 
-    if (temp == list.tail)
+    if(curr->next == NULL)
     {
-        return abs(end - start);
+        time += abs(end - start);
+        return time;
     }
 
-    while (temp != target)
+    time += abs(curr->floor - start);
+    time++;
+
+    while(curr->next != target)
     {
-        time += abs(temp->floor - curr);
-        curr = temp->floor;
-        temp = temp->next;
+        time += abs(curr->next->floor - curr->floor);
+        time++; // 타고 내리는 데 걸리는 시간
+        curr = curr->next;
     }
-
-    time += abs(end - curr);
-
+    time += abs(end - curr->floor);
     return time;
 }
 
@@ -833,6 +819,11 @@ void move_elevator(Elevator *elevators[6])
             }
             else
             {
+                if(elevators[i]->next_dest != next_floor->floor)
+                {
+                    elevators[i]->next_dest = next_floor->floor;
+                }
+
                 if (elevators[i]->next_dest > elevators[i]->current_floor)
                 {
                     (elevators[i]->current_floor)++;
@@ -843,7 +834,7 @@ void move_elevator(Elevator *elevators[6])
                 }
                 else
                 {
-                    elevators[i]->next_dest = next_floor->floor;
+                    //elevators[i]->next_dest = next_floor->floor;
                     if (elevators[i]->current_floor == next_floor->floor)
                     {
                         elevators[i]->current_people += next_floor->people;
