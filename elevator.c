@@ -509,6 +509,8 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current)
     // 3. 각각의 소요시간을 구한다
     // 4. 최소 시간 걸리는 엘리베이터 리턴
 
+    printf("\n"); // 출력 줄맞춤 위함
+
     if ((current->start_floor > 10 && current->dest_floor <= 10) || (current->start_floor <= 10 && current->dest_floor > 10))
     {
         s = 2;
@@ -584,6 +586,8 @@ Elevator *find_elevator(Elevator *elevators[6], Request *current)
     ideal_index = find_min(time_required, size);
     free(time_required);
     free(ideal);
+
+    printf("엘리베이터 %d 호출에 응답 \n", ideal_index + s + 1);
     return elevators[ideal_index + s];
 }
 
