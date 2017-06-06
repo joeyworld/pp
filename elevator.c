@@ -595,46 +595,38 @@ F_node *find_scheduled_place(F_node *start, F_node *end, int start_floor, int de
     {
         while (1)
         {
-            if (target < current->floor)
+            if(current->next == NULL)
             {
                 return current;
             }
-            if (current->next == NULL)
+            if(current == end->next)
+            {
+                return current;
+            }
+            if(target < current->floor)
             {
                 return current;
             }
             current = current->next;
-            if (current->next == NULL)
-            {
-                return current;
-            }
-            if (current == end->next)
-            {
-                return current;
-            }
         }
     }
     else
     {
         while (1)
         {
-            if (target > current->floor)
+            if(current->next == NULL)
             {
                 return current;
             }
-            if (current->next == NULL)
+            if(current == end->next)
+            {
+                return current;
+            }
+            if(target > current->floor)
             {
                 return current;
             }
             current = current->next;
-            if (current->next == NULL)
-            {
-                return current;
-            }
-            if (current == end->next)
-            {
-                return current;
-            }
         }
     }
 }
@@ -643,27 +635,25 @@ F_node *find_direction_change_location(F_node *current, int current_direction)
 {
     int new_direction;
     F_node *target = current;
-    if (current->next == NULL)
-    {
-        return current;
-    }
 
     while (1)
     {
+        if(target->next == NULL)
+        {
+            return target;
+        }
+        else if(target->next->next == NULL)
+        {
+            return target->next;
+        }
+
+        new_direction = target->next->floor - target->floor;
+        if(new_direction * current_direction < 0)
+        {
+            return target;
+        }
+
         target = target->next;
-        if (target->next == NULL)
-        {
-            return target;
-        }
-        else if (target->next->next == NULL)
-        {
-            return target;
-        }
-        new_direction = target->floor - current->floor;
-        if (new_direction * current_direction < 0)
-        {
-            return target;
-        }
     }
 }
 
@@ -680,18 +670,20 @@ F_node *find_ideal_location(Elevator *elevator, int start_floor, int dest_floor,
         return start;
     }
 
-    if (F_list_size(list) == 1)
-    {
-        return start->next;
-    }
-
     elevator_direction = start->floor - elevator->current_floor;
-    call_direction = dest_floor - start_floor;
-
-    if (elevator_direction == 0)
+    if(elevator_direction == 0)
     {
-        elevator_direction = start->next->floor - start->floor;
+        if(F_list_size(list) == 1)
+        {
+            return start->next;
+        }
+        else
+        {
+            elevator_direction = start->next->floor - start->floor;
+        }
     }
+
+    call_direction = dest_floor - start_floor;
 
     if (call_direction > 0)
     {
@@ -757,6 +749,12 @@ int find_time(F_list list, F_node *target, int start, int end)
 {
     int time = 0;
     F_node *curr = list.head->next;
+
+    if(curr == target)
+    {
+        time += abs(end - start);
+        return time;
+    }
 
     if (curr->next == NULL)
     {
@@ -877,6 +875,7 @@ void move_elevator(Elevator *elevators[6])
 
                             pair->people = available * -1;
 
+                            flag = 1;
                             insert_into_queue(elevators[i]->current_floor, pair->floor, leftover);
                         }
                     }
