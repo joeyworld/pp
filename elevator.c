@@ -399,8 +399,8 @@ void quit(Simul *simul)
     while(curr != NULL)
     {
         temp = curr;
-        free(temp);
         curr = curr->next;
+        free(temp);
     }
 
     free(simul->input->req_current_floor);
