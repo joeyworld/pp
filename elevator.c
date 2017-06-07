@@ -449,8 +449,8 @@ void simul_restart(Simul *simul)
     while(curr != reqs.tail)
     {
         temp = curr;
-        free(temp);
         curr = curr->next;
+        free(temp);
     }
     reqs.head->next = reqs.tail;
     reqs.tail->prev = reqs.head;
